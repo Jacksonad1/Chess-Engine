@@ -1,0 +1,112 @@
+
+/* grunticon Stylesheet Loader | https://github.com/filamentgroup/grunticon | (c) 2012 Scott Jehl, Filament Group, Inc. | MIT license. */
+window.grunticon=function(e){if(e&&3===e.length){var t=window,n=!!t.document.createElementNS&&!!t.document.createElementNS("http://www.w3.org/2000/svg","svg").createSVGRect&&!!document.implementation.hasFeature("http://www.w3.org/TR/SVG11/feature#Image","1.1"),A=function(A){var o=t.document.createElement("link"),r=t.document.getElementsByTagName("script")[0];o.rel="stylesheet",o.href=e[A&&n?0:A?1:2],r.parentNode.insertBefore(o,r)},o=new t.Image;o.onerror=function(){A(!1)},o.onload=function(){A(1===o.width&&1===o.height)},o.src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="}};
+grunticon( [ "http://forums.devshed.com/clientscript/vbulletin_css/style00010l/js/icons.data.svg.css", "http://forums.devshed.com/clientscript/vbulletin_css/style00010l/js/icons.data.png.css", "http://forums.devshed.com/clientscript/vbulletin_css/style00010l/js/icons.fallback.css", ] );
+
+jQuery('.dropdown').on('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    jQuery('.menu').toggleClass('menu-open');
+
+    $(document).one('click', function(e){
+        if($('.menu').has(e.target).length === 0){
+            $('.menu').removeClass('menu-open');
+        }
+    });
+    return false;
+  });
+
+jQuery(".dropdown").click(function(e) { 
+    e.preventDefault();
+    e.stopPropagation();
+
+    jQuery(this).toggleClass("dropdown-open");
+
+    $(document).one('click', function(e){
+        if($('.dropdown').has(e.target).length === 0){
+            $('.dropdown').removeClass('dropdown-open');
+        }
+    });
+  });
+
+jQuery(".close-action").click(function(){
+    jQuery(".closed-dismissable").toggleClass("open-dismissable");
+    jQuery(".dismissable").slideUp("slow");
+  });
+
+jQuery(".open-action").click(function(){
+    jQuery(".closed-dismissable").toggleClass("open-dismissable");
+    jQuery(".dismissable").slideDown("slow");
+  });
+
+// tabs!
+jQuery(document).ready(function() {
+      var jQuerytabContent = jQuery(".tab-content"),
+          jQuerytabs = jQuery(".tabs li"),
+          tabId;
+
+      jQuerytabContent.hide();
+      jQuery(".tabs li:first").addClass("active").show();
+      jQuerytabContent.first().show();
+
+      jQuerytabs.click(function(evt) {
+          evt.preventDefault();
+          var jQuerythis = jQuery(this);
+          jQuerytabs.removeClass("active");
+          jQuerythis.addClass("active");
+          jQuerytabContent.hide();
+          var activeTab = jQuerythis.find("a").attr("href");
+          jQuery(activeTab).fadeIn();
+          //return false;
+      });
+
+      // Grab the ID of the .tab-content that the hash is referring to
+      tabId = jQuery(window.location.hash).closest('.tab-content').attr('id');
+
+      // Find the anchor element to "click", and click it
+      jQuerytabs.find('a[href=#' + tabId + ']').click();
+  })
+
+  jQuery('a.tab-link').not('.tabs li a').on('click', function(evt) {
+      evt.preventDefault();
+      var whereTo = jQuery(this).attr('goto');
+      jQuerytabs = jQuery(".tabs li");
+      jQuerytabs.find('a[href=#' + whereTo + ']').trigger('click');
+      jQuery('html, body').animate({
+          scrollTop: jQuery('#'+whereTo+' a').offset().top
+      });
+
+  });
+
+  jQuery(function() {
+      jQuery('a.refresh').on("click", function() {
+          location.reload();
+      });
+  });
+
+
+  //flippant stuff for network and login
+  var network_flipcard = document.getElementById('network')
+          , network_list = "<div class='clear margin-bottom-short'><h4 class='inline-block'>Devshed Network</h4><button id='closenetwork' class='close-action icon-sprite float-right'><span class='screen-reader-text'>Close</button></div><ul class='ds-network'><li class='ds-developer-shed icon-ds-network'><a href='http://www.developershed.com' rel='follow'>Developer Shed</a><li class='ds-aspfree icon-ds-network'><a href='http://www.aspfree.com' rel='follow'>ASP Free</a></li> <li class='ds-devshed icon-ds-network'><a href='http://www.devshed.com' rel='follow'>Dev Shed</a></li> <li class='ds-devarticles icon-ds-network'><a href='http://www.devarticles.com' rel='follow'>Dev Articles</a></li> <li class='ds-devhardware icon-ds-network'><a href='http://www.devhardware.com' rel='follow'>Dev Hardware</a></li> <li class='ds-tutorialized icon-ds-network'><a href='http://www.tutorialized.com' rel='follow'>Tutorialized</a></li> <li class='ds-seochat icon-ds-network'><a href='http://www.seochat.com' rel='follow'>SEO Chat</a></li> <li class='ds-codewalkers icon-ds-network'><a href='http://www.codewalkers.com' rel='follow'>Codewalkers</a></li> <li class='ds-webhosters icon-ds-network'><a href='http://webhosting.devshed.com' rel='follow'>Web Hosters</a></li> <li class='ds-devmechanic icon-ds-network'><a href='http://tools.devshed.com' rel='follow'>Dev Mechanic</a></li><li class='ds-creatsite icon-ds-network'><a href='http://www.cre8asiteforums.com/forums/' rel='follow'>Cre8asite Forums</a></li></ul>"
+          , network_close;
+          
+          document.getElementById("flipnetwork").addEventListener('click',function(e){
+          network_close = flippant.flip(network_flipcard, network_list)
+          document.getElementById("closenetwork").addEventListener('click',function(e){
+          network_close = network_close.close();
+          })
+      });
+
+  if (document.getElementById('fliplogin')) {
+  var login_flipcard = document.getElementById('login')
+          , back_content = "<button id='closelogin' class='close-action icon-sprite float-right'><span class='screen-reader-text'>Close</button><h4>Login</h4><form id='navbar_loginform' class='login_form shed-form' action='http://forums.devshed.com/login.php?do=login' method='post' onsubmit='md5hash(vb_login_password, vb_login_md5password, vb_login_md5password_utf, 0)'> <fieldset id='logindetails' class='logindetails'> <label><span>Username</span> <input type='text' class='input' name='vb_login_username' id='navbar_username' accesskey='u' tabindex='101' placeholder='Tim Berners-Lee' /> </label> <label><span>Password</span> <input placeholder='Something Secure' type='password' class='input' tabindex='102' name='vb_login_password' id='navbar_password'  /> </label> <input type='text' class='textbox default-value' tabindex='102' name='vb_login_password_hint' id='navbar_password_hint' value='Password' style='display:none;' /> <input type='submit' class='button-primary' tabindex='104' value='Log in' title='Enter your username and password in the boxes provided to login, or click the register button to create a profile for yourself.' accesskey='s' /> </fieldset> <div id='remember' class='remember'> <ul class='login-meta'> <li><label class='login-checkbox'><input type='checkbox' name='cookieuser' value='1' id='cb_cookieuser_navbar' class='cb_cookieuser_navbar input checkbox' accesskey='c' tabindex='103'> Remember Me?</label></li> <hr class='basecolor-bg-light' /> <li><a class='action-link' rel='nofollow' href='http://forums.devshed.com/register.php' rel='nofollow'>Register</a></li> <li><a class='action-link' href='http://forums.devshed.com/login.php?do=lostpw'>Lost Password?</a></li> </ul> </div> <input type='hidden' name='s' /> <input type='hidden' name='securitytoken' value='guest' /> <input type='hidden' name='do' value='login' /> <input type='hidden' name='vb_login_md5password' /> <input type='hidden' name='vb_login_md5password_utf' /> </form>"
+          , back;
+          
+          document.getElementById("fliplogin").addEventListener('click',function(e){
+          back = flippant.flip(login_flipcard, back_content)
+          document.getElementById("closelogin").addEventListener('click',function(e){
+          back = back.close();
+          })
+      }); 
+  }

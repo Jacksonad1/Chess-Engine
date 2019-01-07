@@ -1,0 +1,2066 @@
+var jQueryDupe = $;
+
+$.noConflict(true)(function($)
+{
+	var paused 				= {},	// What instances are pausing fetching
+		editorContents 		= {},	// The contents of each instance's editors
+		shoutDelay 			= {},	// The shout delays for each instance
+		idleTime 			= {},	// Number of seconds we have been idle
+		hasFetched 			= {},	// Whether we have fetched shouts before
+		tab 				= {},	// What shoutbox tab we are viewing
+		tabList 			= {},	// The list of all shoutbox tabs
+		countDown 			= {},	// Countdown till next shout refresh, visible in console log
+		pmUserId 			= {},	// The userid we are currently PMing, if any
+		userIds 			= {},	// An array of userid : username used for creating PM tabs
+		pmTime 				= {},	// The last time we received a forum PM
+		shoutId 			= {},	// The shout ID we are currently editing, if any
+		chatroom 			= {},	// The chatroom ID we are currently in, if any
+		aopFile 			= {},	// The files we are working with for AOP
+		aopTime 			= {},	// The AOP Times
+		menuId 				= {},	// The menu ID
+		smilieWindows 		= {}	// Smilie popups
+	;
+	
+	if (typeof vBShout.instanceOptions == 'undefined' || fetchElem('form', false, 'form').length == 0)
+	{
+		// Some page without a SB
+		return false;
+	}
+	
+	if (!AJAX_Compatible)
+	{
+		// AJAX won't work, this is foar srs.
+		setMessage(vbphrase['dbtech_vbshout_ajax_disabled'], 'error');
+		
+		return false;
+	}
+
+	// What time it is right now
+	var timenow = parseInt(new Date().getTime() / 1000);	
+	
+	for (var instanceId in vBShout.instanceOptions)
+	{
+		// Set default tab
+		tab[instanceId] = 'shouts';
+		
+		// Set menu id
+		menuId[instanceId] = 0;
+
+		// Set AOP Time
+		aopTime[instanceId] = {};
+		aopTime[instanceId][tab[instanceId]] = timenow;
+		
+		// Set PM time
+		pmTime[instanceId] = vBShout.userOptions.pmtime;
+		
+		// Set tab list
+		tabList[instanceId] = {
+			'shouts'		: true,
+			'activeusers'	: true
+		};
+		
+		fetchElem('colorrow', instanceId, 'ul', ' > li[class="colorbutton"] > div').on('click', {'instanceId' : instanceId}, function(e)
+		{
+			// Save style properties
+			saveStyleProps(e.data.instanceId, 'color', rgbToHex($(this).css('backgroundColor')));
+		});		
+		
+		fetchElem('fontrow', instanceId, 'ul', ' > li[class="fontname"] > a').on('click', {'instanceId' : instanceId}, function(e)
+		{
+			// Save style properties
+			saveStyleProps(e.data.instanceId, 'font', $(this).text());
+		});		
+		
+		fetchElem('sizerow', instanceId, 'ul', ' > li[class="fontsize"] > a').on('click', {'instanceId' : instanceId}, function(e)
+		{
+			// Save style properties
+			saveStyleProps(e.data.instanceId, 'size', $(this).text());
+		});
+		
+		for (var i in vBShout.tabs[instanceId])
+		{
+			// Create these tabs
+			createTab(i, instanceId, vBShout.tabs[instanceId][i].text, vBShout.tabs[instanceId][i].canclose, vBShout.tabs[instanceId][i].extraparams);
+		}
+	}
+	
+	var tmp = {0:'color', 1:'font', 2:'size'};
+	for (var i in tmp)
+	{
+		fetchElem(tmp[i] + 'row', false, 'ul').each(function(index, element)
+		{
+			var thisRow = $(this),
+				instanceId	= thisRow.attr('data-instanceid');
+			
+			if (vBShout.editorOptions[instanceId][tmp[i]])
+			{
+				// We're adding a button class
+				saveStyleProps(instanceId, tmp[i], vBShout.editorOptions[instanceId][tmp[i]], true);
+			}
+		});
+	}
+
+	fetchElem('editor').on('keyup focus', function(e)
+	{
+		var thisEditor = $(this),
+			instanceId	= thisEditor.attr('data-instanceid');
+		
+		// Check message length
+		
+		if (vBShout.instanceOptions[instanceId].maxchars == 0)
+		{
+			// We're not checking length
+			if (thisEditor.val().length)
+			{
+				// Store this
+				editorContents[instanceId] = thisEditor.val();
+			}
+			return true;
+		}
+		
+		if (thisEditor.val().length > vBShout.instanceOptions[instanceId].maxchars)
+		{
+			// Strip characters that go beyond the limit
+			thisEditor.val(thisEditor.val().substring(0, vBShout.instanceOptions[instanceId].maxchars));
+		}
+		
+		if (thisEditor.val().length)
+		{
+			// Store this
+			editorContents[instanceId] = thisEditor.val();
+		}
+		
+		// Set the Remaining Characters count
+		fetchElem('remainingchars', instanceId).text((vBShout.instanceOptions[instanceId].maxchars - thisEditor.val().length));	
+				
+	}).on('keyup', function(e)
+	{
+		var thisEditor = $(this),
+			instanceId	= thisEditor.attr('data-instanceid');
+		
+		// Prevent any default action from happening
+		e.preventDefault();
+		
+		if (e.which == 27 && shoutId[instanceId])
+		{
+			// We're editing a shout, cancel editing
+			fetchElem('cancelbutton', instanceId, 'input').trigger('click');
+		}
+		
+		if (e.which == 13)
+		{
+			// We're saving something
+			fetchElem('savebutton', instanceId, 'input').trigger('click');
+		}
+	});
+
+	fetchElem('savebutton', false, 'input').on('click', function()
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid');
+			
+		// This was saving the form
+		if (shoutId[instanceId])
+		{
+			if (fetchElem('editor', instanceId).val() == fetchElem('shout_raw', instanceId, 'input', '[data-shoutid="' + shoutId[instanceId] + '"]').val())
+			{
+				// Unchanged shout, cancel editing
+				fetchElem('cancelbutton', instanceId, 'input').trigger('click');
+			}
+			else
+			{
+				// Something changed, save
+				saveShout(instanceId);
+			}
+		}
+		else
+		{
+			// Save with no hassles
+			saveShout(instanceId);
+		}
+	});
+
+	fetchElem('lookupbutton', false, 'input').on('click', function()
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid'),
+			lookupArea = fetchElem('lookup', instanceId, 'input')
+			userName = lookupArea.val()
+		;
+		
+		if (userName.length == 0)
+		{
+			// Sadfase
+			return false;
+		}
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Attempting to lookup username: %s in instance %s...', userName, instanceId);
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, false);	
+		
+		if (typeof userIds[instanceId] != 'undefined')
+		{
+			var userId = 0;
+			for (var i in userIds[instanceId])
+			{
+				if (userIds[instanceId][i] != userName)
+				{
+					// Skip this
+					continue;
+				}
+				
+				userId = i;
+			}
+			
+			if (userId > 0)
+			{
+				// Create PM for this user
+				createTab('pm_' + userId + '_' + instanceId, instanceId, userName, '1', {'userid' : userId});
+				
+				// Zero this out
+				lookupArea.val('');
+				
+				return true;
+			}
+		}
+
+		// Execute AJAX
+		ajaxCall('lookup', instanceId, {'username' : PHP.urlencode($.trim(userName))}, 'GET');
+		
+	});
+
+	fetchElem('resettarget', false, 'a').on('click', function()
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid')
+		;
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Resetting shout target in instance %s...', instanceId);			
+		
+		pmUserId[instanceId] = 0;
+		setShoutTarget(false, instanceId);
+		
+		// Show the shouts tab
+		fetchElem('tab', instanceId, 'div', '[data-tabid="shouts"]').trigger('click');
+
+	});
+
+	fetchElem('createchatbutton', false, 'input').on('click', function()
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid'),
+			chatroomName = fetchElem('roomname', instanceId, 'input').val()
+		;
+		
+		if (chatroomName.length == 0)
+		{
+			// Sadfase
+			return false;
+		}
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Attempting to create chatroom: %s in instance %s...', chatroomName, instanceId);			
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, false);	
+		
+		// Execute AJAX
+		ajaxCall('createchat', instanceId, {'title' : PHP.urlencode($.trim(chatroomName))});
+	});
+
+	fetchElem('soundbutton', false, 'img').on('click', function()
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid');
+		
+		// Toggle mute status
+		vBShout.userOptions.soundSettings = vBShout.userOptions.soundSettings || {};
+		vBShout.userOptions.soundSettings[instanceId] = vBShout.userOptions.soundSettings[instanceId] || {};
+		vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] = vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] || '1';
+		vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] = (vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] == '1' ? '0' : '1');
+		
+		// Set the mute button's status
+		setMuteButton(instanceId);
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Toggle mute in instance %s...', instanceId);		
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, false);
+		
+		// Execute AJAX
+		ajaxCall('sounds', instanceId, {'tabs' : vBShout.userOptions.soundSettings[instanceId]});
+				
+	}).each(function(index, element)
+	{
+		var thisButton = $(this),
+			instanceId	= thisButton.attr('data-instanceid');
+		
+		// Set the mute button's status
+		setMuteButton(instanceId);
+	});
+
+	$('li.fontname,li.fontsize,li.colorbutton').on('mouseover mouseout', function(e)
+	{
+		var thisButton = $(this),
+			name 		= thisButton.attr('data-button'),
+			instanceId	= thisButton.attr('data-instanceid');
+		
+		if (thisButton.hasClass('imagebutton_disabled'))
+		{
+			return false;
+		}
+		
+		// Ensure we have a clean set
+		thisButton.removeClass('imagebutton_selected imagebutton_hover imagebutton_down');
+
+		switch (e.type)
+		{
+			case 'mouseover':
+				thisButton.addClass('imagebutton_hover');
+				break;
+				
+			case 'mouseout':
+				thisButton.removeClass('imagebutton_hover');
+				break;
+		}
+	});
+
+	fetchElem('imagebutton', false, 'img').on('click mouseover mouseout', function(e)
+	{
+		var thisButton = $(this),
+			name 		= thisButton.attr('data-button'),
+			instanceId	= thisButton.attr('data-instanceid');
+		
+		if (thisButton.hasClass('imagebutton_disabled'))
+		{
+			return false;
+		}
+		
+		// Ensure we have a clean set
+		thisButton.removeClass('imagebutton_selected imagebutton_hover imagebutton_down');
+
+		switch (vBShout.editorOptions[instanceId][name])
+		{
+			case null:
+			case '':
+			case '0':
+				switch (e.type)
+				{
+					case 'mouseover':
+						thisButton.addClass('imagebutton_hover');
+						break;
+						
+					case 'mouseout':
+						thisButton.removeClass('imagebutton_hover');
+						break;
+					
+					case 'click':
+						thisButton.addClass('imagebutton_down');
+						saveStyleProps(instanceId, name, name);
+						break;
+				}				
+				break;
+			
+			default:
+				switch (e.type)
+				{
+					case 'mouseover':
+						thisButton.addClass('imagebutton_hover').addClass('imagebutton_down');
+						break;
+						
+					case 'mouseout':
+						thisButton.removeClass('imagebutton_hover').addClass('imagebutton_selected');
+						break;
+					
+					case 'click':
+						thisButton.addClass('imagebutton_hover');					
+						saveStyleProps(instanceId, name, '');
+						break;
+				}
+				break;
+		}
+	}).each(function(index, element)
+	{
+		var thisButton = $(this),
+			name 		= thisButton.attr('data-button'),
+			instanceId	= thisButton.attr('data-instanceid');
+		
+		if (vBShout.editorOptions[instanceId][name] != '0')
+		{
+			// We're adding a button class
+			thisButton.mouseout();
+			saveStyleProps(instanceId, name, vBShout.editorOptions[instanceId][name], true);
+		}
+	});
+
+	fetchElem('clearbutton', false, 'input').on('click', function()
+	{
+		// Clear button clicked
+		fetchElem('editor', $(this).attr('data-instanceid')).val('');
+	});
+
+	fetchElem('smilies').on('click', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+		
+		if (typeof smilieWindows[instanceId] != 'undefined' && !smilieWindows[instanceId].closed)
+		{
+			// Swap focus to it
+			smilieWindows[instanceId].focus();
+		}
+		else
+		{
+			// Open the smiley window
+			smilieWindows[instanceId] = openWindow('misc.php?' + SESSIONURL + 'do=getsmilies&editorid=dbtech_vbshout_editor' + instanceId, 440, 480, 'smilie_window' + instanceId);
+			
+			// Schedule the window's destruction
+			window.onunload = function()
+			{
+				if (typeof smilieWindows[instanceId] != 'undefined' && !smilieWindows[instanceId].closed)
+				{
+					// Close the window
+					smilieWindows[instanceId].close();
+				}				
+			};
+		}
+		
+	});
+	
+	fetchElem('cancelbutton', false, 'input').on('click', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+
+		// Proceed.
+		paused[instanceId] = false;
+		
+		// Set the shout id
+		shoutId[instanceId] = 0;
+		
+		// Set editor contents
+		fetchElem('editor', $(this).attr('data-instanceid')).val('');
+		
+		// Just to be safe
+		fetchElem('editor', instanceId).trigger('keyup');
+				
+		// Show various buttons			
+		fetchElem('delete', instanceId, 'span').fadeOut('fast');
+		fetchElem('cancel', instanceId, 'span').fadeOut('fast');	
+		
+		// Help text change
+		fetchElem('target', instanceId, 'span').fadeIn('fast');
+		fetchElem('editing', instanceId, 'span').fadeOut('fast');
+	});
+
+	fetchElem('deletebutton', false, 'input').on('click', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+
+ 		if (!shoutId[instanceId] || shoutId[instanceId] == '0')
+		{
+			// This should never happen but just in case
+			return false;
+		}
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Attempting to delete shout: %s... in instance %s', shoutId[instanceId], instanceId);			
+		
+		// Initialise this
+		var extraParams = {};
+		
+		if (pmUserId[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['type'] = 'pm_' + pmUserId[instanceId] + '_';
+		}	
+		else if (chatroom[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['type'] = 'chatroom_' + chatroom[instanceId] + '_';
+		}	
+		
+		// Set shout id
+		extraParams['shoutid'] = shoutId[instanceId];
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, true);
+		
+		// Execute AJAX
+		ajaxCall('delete', instanceId, extraParams);
+		
+		// Avoid duplicating code
+		fetchElem('cancelbutton', instanceId, 'input').trigger('click');
+	});
+
+	fetchElem('setcommand', false, 'a').on('click', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+
+		fetchElem('editor', instanceId).val(cmd.attr('data-command'));
+		
+		if (menuId[instanceId])
+		{
+			// Close current menu
+			fetchElem('togglemenu', instanceId, 'a', '[data-userid="' + menuId[instanceId] + '"]').trigger('click');
+		}
+	});
+
+	fetchElem('form', false, 'form').on('dblclick', 'div[name="dbtech_vbshout_frame_sticky"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+		
+		if (vBShout.instancePermissions[instanceId]['cansticky'] == '0')
+		{
+			// We can't edit sticky
+			return true;
+		}
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Fetching sticky for instance %s...', instanceId);		
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, false);
+		
+		// Make an AJAX call
+		ajaxCall('fetchsticky', instanceId, {}, 'GET');		
+
+	}).on('click', 'a[name="dbtech_vbshout_togglemenu"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid'),
+			userId = cmd.attr('data-userid'),
+			shoutId = cmd.attr('data-shoutid');
+		
+		if (menuId[instanceId])
+		{
+			// Close current menu
+			fetchElem('menu', cmd.attr('data-instanceid'), 'ul', '[data-userid="' + menuId[instanceId] + '"]').fadeOut('fast');
+		}
+		
+		if (menuId[instanceId] == userId)
+		{
+			// We're closing the current menu
+			menuId[instanceId] = 0;
+			return true;
+		}
+		
+		// We're opening a new menu
+		menuId[instanceId] = userId;
+		
+		// Show the new menu
+		fetchElem('menu', instanceId, 'ul', '[data-shoutid="' + shoutId + '"]')
+			.fadeIn('fast')
+			.css({
+				position: 'absolute'
+			})
+			.offset({
+				top: (cmd.offset().top + cmd.height()),
+				left: cmd.offset().left				
+			})
+		;
+
+	}).on('click', 'a[name="dbtech_vbshout_setcommand"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid');
+
+		fetchElem('editor', instanceId).val(cmd.attr('data-command'));
+		
+		if (menuId[instanceId])
+		{
+			// Close current menu
+			fetchElem('togglemenu', instanceId, 'a', '[data-userid="' + menuId[instanceId] + '"]').trigger('click');
+		}
+
+	}).on('click', 'a[name="dbtech_vbshout_usermanage"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid'),
+			action = cmd.attr('data-command'),
+			userId = cmd.attr('data-userid')
+		;
+		
+		if (confirm(vbphrase['dbtech_vbshout_are_you_sure_' + action]))
+		{
+			// We're editing a shout
+			console.log(timeStamp() + 'Attempting to perform action %s on userid %s, instance id %s...', action, userId, instanceId);			
+			
+			// Initialise this
+			var extraParams = {};
+			
+			if (pmUserId[instanceId])
+			{
+				// Set who we're PMing
+				extraParams['type'] = 'pm_' + pmUserId[instanceId] + '_';
+			}	
+			else if (chatroom[instanceId])
+			{
+				// Set who we're PMing
+				extraParams['type'] = 'chatroom_' + chatroom[instanceId] + '_';
+			}	
+			
+			// Set action
+			extraParams['manageaction'] = action;
+			
+			// Set userid
+			extraParams['userid'] = userId;
+			
+			// HALT
+			paused[instanceId] = true;
+	
+			// Remove any idle flag we might have
+			vBShout_unIdle(instanceId, true);
+			
+			// Execute AJAX
+			ajaxCall('usermanage', instanceId, extraParams);
+		}
+		
+		if (menuId[instanceId])
+		{
+			// Close current menu
+			fetchElem('togglemenu', instanceId, 'a', '[data-userid="' + menuId[instanceId] + '"]').trigger('click');
+		}
+
+	}).on('click', 'a[name="dbtech_vbshout_createpm"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid'),
+			userName = cmd.attr('data-username'),
+			userId = cmd.attr('data-userid')
+		;
+		
+		// Store this lookup
+		userIds[userId] = userName;
+		
+		// Create the PM tab
+		createTab('pm_' + userId + '_' + instanceId, instanceId, userName, '1', {'userid' : userId});
+		
+		// Show tab
+		fetchElem('tab', instanceId, 'div', '[data-tabid="pm_' + userId + '_' + instanceId + '"]').trigger('click');
+
+		if (menuId[instanceId])
+		{
+			// Close current menu
+			fetchElem('togglemenu', instanceId, 'a', '[data-userid="' + menuId[instanceId] + '"]').trigger('click');
+		}
+
+	}).on('click', 'a[name="dbtech_vbshout_closetab"]', function(e)
+	{
+		var closeLink = $(this),
+			instanceId = closeLink.attr('data-instanceid'),
+			tabId = closeLink.attr('data-tabid'),
+			chatroomId = fetchElem('tab', instanceId, 'div', '[data-tabid="' + tabId + '"]').attr('data-chatroomid')
+		;
+		
+		// Prevent event bubbling
+		e.preventDefault();
+		
+		if (chatroomId)
+		{
+			if (!confirm(vbphrase['dbtech_vbshout_are_you_sure_chatleave']))
+			{
+				// We're not leaving chat room
+				return false;
+			}
+			
+			// We're editing a shout
+			console.log(timeStamp() + 'Closing tab: %s in instance %s...', tabId, instanceId);			
+			
+			// HALT
+			paused[instanceId] = true;
+	
+			// Remove any idle flag we might have
+			vBShout_unIdle(instanceId, false);
+			
+			// Nah, we don't want this chat
+			ajaxCall('leavechat', instanceId, {'chatroomid' : chatroomId});
+		}
+		
+		// Close the tab
+		closeTab(tabId, instanceId);
+
+	}).on('click', 'div[name="dbtech_vbshout_tab"]', function(e)
+	{
+		var thisTab = $(this),
+			instanceId = thisTab.attr('data-instanceid'),
+			tabId = thisTab.attr('data-tabid'),
+			userId = thisTab.attr('data-userid'),
+			chatroomId = thisTab.attr('data-chatroomid');
+		
+		if (tab[instanceId] == tabId || e.isDefaultPrevented())
+		{
+			return false;
+		}
+		
+		// Log a debug message to the console
+		console.log(timeStamp() + "Switching from %s to %s for instance %s.", tab[instanceId], tabId, instanceId);		
+		
+		if (thisTab.attr('data-loadurl'))
+		{
+			// Redirect the window
+			window.location.href = thisTab.attr('data-loadurl');
+			return false;
+		}
+		
+		// Set pm user id
+		pmUserId[instanceId] = (userId != '' ? userId : 0);
+		
+		// Set chatroom id
+		chatroom[instanceId] = (chatroomId != '' ? chatroomId : 0);
+		
+		// Set shout target
+		setShoutTarget((userId != '' ? userIds[userId] : false), instanceId);
+		
+		// Fade the chat invite button
+		chatroom[instanceId] ? fetchElem('chatinvite', instanceId).fadeIn('fast') : fetchElem('chatinvite', instanceId).fadeOut('fast');
+		
+		// Set tab styles on the old tab
+		fetchElem('tab', instanceId, 'div', '[data-tabid="' + tab[instanceId] + '"]').removeClass('alt').addClass('alt2');
+		
+		// Set tab styles on the new tab
+		thisTab.removeClass('alt2 dbtech_vbshout_highlight').addClass('alt');
+		
+		// Set the new content
+		tab[instanceId] = tabId;
+		
+		// Set the mute button's status
+		setMuteButton(instanceId);
+		
+		// Blank out the contents
+		fetchElem('content', instanceId).text('');
+		
+		// HALT
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, false);
+		
+		// We're needing new content
+		fetchShouts(instanceId, tab[instanceId], true);
+		
+		return false;
+
+	}).on('dblclick', 'span[name="dbtech_vbshout_shout"]', function()
+	{
+		var cmd = $(this),
+			instanceId = cmd.attr('data-instanceid')
+			shoutid = cmd.attr('data-shoutid')
+		;
+		
+		if (!shoutid)
+		{
+			// Skip this
+			return true;
+		}
+		
+		// HALT
+		paused[instanceId] = true;
+		
+		// Set the shout id
+		shoutId[instanceId] = shoutid;
+		
+		// Set editor contents
+		fetchElem('editor', instanceId).val(fetchElem('shout_raw', instanceId, 'input', '[data-shoutid="' + shoutid + '"]').val());
+		
+		// Just to be safe
+		fetchElem('editor', instanceId).trigger('keyup');
+				
+		// Show various buttons			
+		fetchElem('delete', instanceId, 'span').fadeIn('fast');
+		fetchElem('cancel', instanceId, 'span').fadeIn('fast');	
+		
+		// Help text change
+		fetchElem('target', instanceId, 'span').fadeOut('fast');
+		fetchElem('editing', instanceId, 'span').fadeIn('fast');
+	});
+
+	// #########################################################################	
+	// Button click in archive shout
+	fetchElem('archive_managebutton').on('click', function()
+	{
+		var btn = $(this),
+			instanceId = btn.attr('data-instanceid'),
+			shoutId = btn.attr('data-shoutid'),
+			cmd = btn.attr('data-command')
+		;
+		
+		// We're editing a shout
+		console.log(timeStamp() + 'Attempting to %s Archive shout: %s...', cmd, shoutId);			
+		
+		if (cmd == 'edit')
+		{
+			// We're editing a shout
+			fetchElem('archive_message', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeOut('fast');
+			fetchElem('archive_wrapper', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeIn('fast');
+			fetchElem('archive_editor', instanceId).filter('[data-shoutid="' + shoutId + '"]').val(PHP.unhtmlspecialchars(fetchElem('archive_message_raw', instanceId).filter('[data-shoutid="' + shoutId + '"]').val()));
+		}
+		else if (cmd == 'cancel')
+		{
+			// We're editing a shout
+			fetchElem('archive_message', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeIn('fast');
+			fetchElem('archive_wrapper', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeOut('fast');
+		}
+		else if (cmd == 'save')
+		{
+			var editor = fetchElem('archive_editor', instanceId).filter('[data-shoutid="' + shoutId + '"]');
+				
+			// Set the raw text
+			fetchElem('archive_message', instanceId).filter('[data-shoutid="' + shoutId + '"]').text(editor.val());
+			fetchElem('archive_message_raw', instanceId).filter('[data-shoutid="' + shoutId + '"]').val(editor.val());
+			
+			// We're editing a shout
+			fetchElem('archive_message', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeIn('fast');
+			fetchElem('archive_wrapper', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeOut('fast');
+			
+			// Execute AJAX
+			ajaxCall('save', instanceId, {
+				'shoutid' : shoutId,
+				'message' : PHP.urlencode($.trim(editor.val())),
+				'source' : 'archive'
+			});			
+		}
+		else if (cmd == 'delete')
+		{
+			if (!confirm(vbphrase['dbtech_vbshout_are_you_sure_shoutdelete']))
+			{
+				// We didn't acknowledge
+				return false;
+			}
+			
+			// Remove the shout
+			fetchElem('archive_shout', instanceId).filter('[data-shoutid="' + shoutId + '"]').fadeOut('fast');
+			
+			// Execute AJAX
+			ajaxCall('delete', instanceId, {
+				'shoutid' : shoutId,
+				'source' : 'archive'
+			});			
+		}
+	});
+
+	$('.dbtech-vbshout-popupmenu > ul > li').click(function(e)
+	{
+		// Get rid of the menu		
+		var $container = $(this),
+			$subList = $container.parent();
+		$subList.slideUp('fast');
+
+		// Return
+		return $subList.hasClass('submenu');
+	});
+	
+	$('.dbtech-vbshout-popupmenu').click(function(e)
+	{
+		var $container = $(this),
+			$subList = $('> ul', $container);
+
+		if ($container.hasClass('dbtech-vbshout-popupmenu-active'))
+		{
+			e.target.parentNode.click(); //for IE's sake
+			$subList.slideUp('fast');
+			return $subList.hasClass('submenu');
+		}
+
+		$container.addClass('dbtech-vbshout-popupmenu-active');
+		$subList.css('top', $container.outerHeight()).slideDown('fast');
+
+		return false;
+	});
+
+	$('body').click(function(e)
+	{
+		if ($(e.target).closest('.dbtech-vbshout-popupmenu').size() == 0)
+		{
+			$('.dbtech-vbshout-popupmenu > ul').slideUp('fast');
+			$('.dbtech-vbshout-popupmenu').removeClass('dbtech-vbshout-popupmenu-active');
+		}
+	});
+
+	// Check the input length
+	fetchElem('editor').trigger('keyup');
+	
+	if (!vBShout.userOptions.archive)
+	{
+		for (var instanceId in vBShout.instanceOptions)
+		{		
+			// By default, we haven't been idle
+			idleTime[instanceId] = 0;
+			shoutDelay[instanceId] = 0;
+			countDown[instanceId] = 1;
+		}
+		
+		// Initial shouts fetcing
+		setInterval(function()
+		{
+			for (var instanceId in vBShout.instanceOptions)
+			{
+				if (!fetchElem('frame_notice', instanceId, 'div').length)
+				{
+					// Skip this
+					continue;
+				}
+				
+				if (shoutDelay[instanceId] > 0)
+				{
+					// We've shouted x seconds ago
+					shoutDelay[instanceId]--;
+				}
+				
+				if (vBShout.userOptions.idle[instanceId].unIdle)
+				{
+					// Log a debug message to the console
+					console.log(timeStamp() + "Removing idle for instance %s.", instanceId);		
+
+					// Hide the notice message
+					fetchElem('frame_notice', instanceId, 'div').fadeOut('fast');
+					
+					// Reset idle timer
+					idleTime[instanceId] = 0;
+					
+					if (vBShout.userOptions.idle[instanceId].unPause)
+					{
+						// Unpause
+						paused[instanceId] = false;
+						countDown[instanceId] = 1;
+					}
+					
+					// Reset these
+					vBShout.userOptions.idle[instanceId].unIdle = false;
+					vBShout.userOptions.idle[instanceId].unPause = false;
+				}			
+				
+				if (paused[instanceId] == true)
+				{
+					// We're not doing anything atm
+					continue;
+				}
+				
+				// Increment idle time
+				idleTime[instanceId]++;			
+				
+				// Log a debug message to the console
+				//console.log(timeStamp() + "Idle time: %s for instance %s.", idleTime[instanceId], instanceId);		
+				
+				if (idleTime[instanceId] >= vBShout.instanceOptions[instanceId].idletimeout && vBShout.instanceOptions[instanceId].idletimeout > 0 || (!hasFetched[instanceId] && vBShout.instancePermissions[instanceId].autoidle))
+				{
+					// We're pausing the countdown
+					paused[instanceId] = true;
+					
+					// We're idle
+					setMessage(vbphrase['dbtech_vbshout_flagged_idle']
+						.replace('%link%', 'return vBShout_unIdle(\'' + instanceId + '\');'),
+						'notice',
+						instanceId
+					);
+					
+					if (!hasFetched[instanceId])
+					{
+						// Fetch shouts nao
+						fetchShouts(instanceId, 'shouts', true);
+					}
+					
+					continue;
+				}		
+				
+				if (--countDown[instanceId] > 0)
+				{
+					// Still not fetching :(
+					/*
+					console.log(timeStamp() + vbphrase['dbtech_vbshout_fetching_shouts_in_x_seconds']
+						.replace('%seconds%', countDown[instanceId]) + ' Instance ID: ' + instanceId
+					);
+					*/
+				}
+				else
+				{
+					if (!hasFetched[instanceId])
+					{
+						// Fetch shouts nao
+						fetchShouts(instanceId, 'shouts', true);
+						hasFetched[instanceId] = true;
+					}
+					else
+					{
+						// Fetch shouts nao
+						fetchShouts(instanceId);
+					}
+				}		
+			}
+		}, 1000);
+	}	
+
+	// #########################################################################	
+	// Creates the tab
+	function createTab(tabId, instanceId, tabText, canClose, extraParams)
+	{
+		if (tabList[instanceId][tabId])
+		{
+			// Show this tab instead
+			fetchElem('tab', instanceId, 'div', '[data-tabid="' + tabId + '"]').trigger('click');
+			return false;
+		}
+		
+		// This tab now exists
+		tabList[instanceId][tabId] = true;
+		
+		// Insert the cell at the appropriate place
+		fetchElem('tabs', instanceId, 'table', ' > tbody > tr > td')
+			.filter(':last')
+			.before('<td class="dbtech_vbshout_tabcontainer"><div name="dbtech_vbshout_tab" data-instanceid="' + instanceId + '" data-tabid="' + tabId + '" class="dbtech_vbshout_tabs alt2">' + tabText + (canClose == '1' ? ' [<a href="javascript://" name="dbtech_vbshout_closetab" data-instanceid="' + instanceId + '" data-tabid="' + tabId + '">X</a>]' : '') + '</div></td>');
+		
+		if (typeof extraParams == 'undefined')
+		{
+			// We're done
+			return true;
+		}
+		
+		var newTab = fetchElem('tab', instanceId, 'div', '[data-tabid="' + tabId + '"]');
+		for (var i in extraParams)
+		{
+			// Set new attributes for this tab
+			newTab.attr('data-' + i, extraParams[i]);
+		}
+		
+		return true;
+	};
+	
+	// #########################################################################	
+	// Closes the tab
+	function closeTab(tabId, instanceId)
+	{
+		// Deactivate this tab
+		tabList[instanceId][tabId] = false;		
+		
+		if (tab[instanceId] == tabId)
+		{
+			// Log a debug message to the console
+			console.log(timeStamp() + "Attempting to switching from %s to %s for instance %s.", tab[instanceId], 'shouts', instanceId);		
+			
+			// Show tab
+			fetchElem('tab', instanceId, 'div', '[data-tabid="shouts"]').trigger('click');
+		}
+		
+		// Close tab
+		fetchElem('tab', instanceId, 'div', '[data-tabid="' + tabId + '"]').remove();
+		
+		return true;
+	};
+	
+	// #########################################################################	
+	// Sets the shout target
+	function setShoutTarget(username, instanceId)
+	{
+		// Fetch the two objects
+		var everyone = fetchElem('everyone', instanceId, 'span');
+		
+		if (everyone)
+		{
+			if (!username)
+			{
+				// Reverting to everyone
+				everyone.html(vbphrase['dbtech_vbshout_everyone']);
+			}
+			else
+			{
+				// Setting a username
+				everyone.html($.trim(username));
+			}
+		}
+	};
+
+	// #########################################################################	
+	// Submit a new shout or save the editing shout
+	function saveShout(instanceId)
+	{
+		var editor = fetchElem('editor', instanceId);
+		
+		if (!editor.val().length)
+		{
+			// We don't care about empty shouts
+			return false;
+		}
+		
+		// Just to be sure
+		vBShout.instanceOptions[instanceId].floodchecktime = parseInt(vBShout.instanceOptions[instanceId].floodchecktime);
+		
+		if (shoutDelay[instanceId])
+		{
+			// We've shouted x seconds ago
+			setMessage(vbphrase['dbtech_vbshout_must_wait_x_seconds']
+				.replace('%time%', vBShout.instanceOptions[instanceId].floodchecktime)
+				.replace('%time2%', (vBShout.instanceOptions[instanceId].floodchecktime - shoutDelay[instanceId])),
+				'error',
+				instanceId
+			);
+			
+			return false;
+		}		
+		
+		// Initialise this
+		var extraParams = {};
+		
+ 		if (shoutId[instanceId])
+		{
+			// We're editing a shout
+			console.log(timeStamp() + 'Attempting to save shout: %s to instance: %s...', shoutId[instanceId], instanceId);			
+		}
+		else
+		{
+			// We're submitting a new shout
+			console.log(timeStamp() + 'Attempting to insert shout to instance: %s...', instanceId);				
+		}
+		
+		if (pmUserId[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['type'] = 'pm_' + pmUserId[instanceId] + '_';
+		}	
+		else if (chatroom[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['type'] = 'chatroom_' + chatroom[instanceId] + '_';
+		}		
+		
+		// Set message
+		extraParams['message'] = PHP.urlencode($.trim(editor.val()));
+		
+		// Reset the countdown
+		paused[instanceId] = true;
+
+		// Remove any idle flag we might have
+		vBShout_unIdle(instanceId, true);
+		
+		// Set shout delay
+		shoutDelay[instanceId] = vBShout.instanceOptions[instanceId].floodchecktime;		
+		
+		// Execute AJAX
+		ajaxCall('save', instanceId, extraParams);
+		
+		if (shoutId[instanceId])
+		{
+			// We're no longer editing a shout
+			fetchElem('cancelbutton', instanceId).trigger('click');
+		}
+		else
+		{
+			// Clear the editor
+			editor.val('');
+		}
+		
+		return false;
+	};
+
+	// #########################################################################
+	// Saves style properties for a certain instance
+	function saveStyleProps(instanceId, type, value, noupdate)
+	{
+		// Default to the same property as the style type
+		var property 	= type;
+		var setValue	= value;
+		switch (type)
+		{
+			case 'bold':
+				property 	= 'fontWeight';
+				setValue = (value ? type : '');
+				break;
+				
+			case 'italic':
+				property 	= 'fontStyle';
+				setValue = (value ? type : '');
+				break;
+				
+			case 'underline':
+				property 	= 'textDecoration';
+				setValue = (value ? type : '');
+				break;
+				
+			case 'font':
+				property 	= 'fontFamily';
+				
+				var fontfield = fetchElem('fontbar', instanceId, 'div'),
+					fontrow = fetchElem('fontrow', instanceId, 'ul');
+				if (fontfield.text() != value)
+				{
+					// Change the text on the font dropdown
+					fontfield.text(value);
+					fontrow.val(value);
+				}				
+				break;
+				
+			case 'size':
+				property 	= 'fontSize';
+				
+				var sizefield = fetchElem('sizebar', instanceId, 'div'),
+					sizerow = fetchElem('sizerow', instanceId, 'ul');
+				if (sizefield.text() != value)
+				{
+					// Change the text on the size dropdown
+					sizefield.text(value);
+					sizerow.val(value);
+				}
+				break;
+				
+			case 'color':
+				var colorfield = fetchElem('colorbar', instanceId, 'img'),
+					colorrow = fetchElem('colorrow', instanceId, 'ul');
+				if (rgbToHex(colorfield.css('backgroundColor')) != value)
+				{
+					// Change the text on the color dropdown
+					colorfield.css('backgroundColor', value);
+				}
+				break;
+		}
+		
+		// Log a debug message to the console
+		console.log(timeStamp() + "Style property %s set. Value: %s. Instance ID: %s", type, setValue, instanceId);
+		
+		if (type == 'size')
+		{
+			// Set the editor style
+			fetchElem('frame', instanceId, 'div').css(property, setValue);
+		}
+		else
+		{
+			// Set the editor style
+			fetchElem('editor', instanceId).css(property, setValue);
+		}
+		
+		if (vBShout.editorOptions[instanceId][type] != value && !noupdate)
+		{
+			// Log a debug message to the console
+			console.log(timeStamp() + "Style property %s changed. Old value: %s - New value: %s. Instance ID: %s", type, vBShout.editorOptions[instanceId][type], value, instanceId);
+			
+			// Change the editor type
+			vBShout.editorOptions[instanceId][type] = value;
+			
+			// Extra parameters for the styleprops save
+			var extraParams = {};
+			
+			// Set editor options
+			extraParams['editor'] = vBShout.editorOptions[instanceId];
+			
+			if (pmUserId[instanceId])
+			{
+				// Set who we're PMing
+				extraParams['type'] = 'pm_' + pmUserId[instanceId] + '_';
+			}	
+			else if (chatroom[instanceId])
+			{
+				// Set who we're PMing
+				extraParams['type'] = 'chatroom_' + chatroom[instanceId] + '_';
+			}		
+			
+			// HALT
+			paused[instanceId] = true;
+	
+			// Remove any idle flag we might have
+			vBShout_unIdle(instanceId, true);
+			
+			// Execute AJAX
+			ajaxCall('styleprops', instanceId, extraParams);
+		}
+	};
+	
+	// #########################################################################
+	// Fetches a given type of content
+	function fetchShouts(instanceId, type, force)
+	{
+		// Reset the countdown
+		paused[instanceId] = true;
+		
+		if (!type)
+		{
+			// Avoid refreshing problem
+			type = tab[instanceId];
+		}
+		
+		if (!(idleTime[instanceId] >= vBShout.instanceOptions[instanceId].idletimeout && vBShout.instanceOptions[instanceId].idletimeout > 0) || force == true)
+		{
+			// Initialise this
+			var extraParams = {};
+			
+			if (typeof aopTime[instanceId][tab[instanceId]] == 'undefined')
+			{
+				force = true;
+			}
+			
+			switch (type)
+			{
+				case 'shout':
+					extraParams['shoutid'] = shoutId[instanceId];
+					break;
+			}
+				
+			for (var i in tabList[instanceId])
+			{
+				if (tabList[instanceId])
+				{
+					// This is an active tab
+					extraParams['tabs[' + i + ']'] = 1;
+				}
+			}
+			
+			// Set type id
+			extraParams['type'] = type;		
+			
+			if ((vBShout.instanceOptions[instanceId].optimisation && !force) && type != 'activeusers')
+			{
+				if (type == 'shouts' || type == 'aop')
+				{
+					// Fetch shouts
+					type = 'shouts' + instanceId;
+				}
+				
+				if (type == 'shoutnotifs' || type == 'systemmsgs')
+				{
+					// Fetch shouts
+					type = type + instanceId;
+				}
+				
+				// Log a debug message to the console
+				console.log(timeStamp() + 'Fetching ' + type + '...');			
+							
+				// Set AOP file
+				aopFile[instanceId] = 'dbtech/vbshout/aop/' + type + '.txt';
+				
+				$.ajax({
+					type: 'GET',
+					url: aopFile[instanceId] + '?v=' + Math.random() * 99999999999999,
+					complete: function(xhr, statusText) {},
+					success: function(data, statusText, xhr)
+					{
+						var d = new Date();
+						var dateline = data;
+						var timenow = parseInt(d.getTime() / 1000);
+						
+						if (dateline > aopTime[instanceId][tab[instanceId]])
+						{
+							console.log(timeStamp() + tab[instanceId] + " AOP file returned new shouts: \n" + dateline + "\n" + aopTime[instanceId][tab[instanceId]]);
+						
+							// Force an update
+							fetchShouts(instanceId, tab[instanceId], true);
+							
+							return false;
+						}
+						
+						if (dateline == 0)
+						{
+							console.log(timeStamp() + "AOP file returned 0");
+							
+							// Force an update
+							fetchShouts(instanceId, tab[instanceId], true);
+							
+							return false;
+						}
+						
+						if ((timenow - dateline) > 60)
+						{
+							console.log(timeStamp() + "AOP file hasn't been modified for 60 seconds: " + (timenow - dateline));
+							
+							aopTime[instanceId][tab[instanceId]] = (timenow + 5);
+							
+							// Force an update
+							fetchShouts(instanceId, tab[instanceId], true);
+							
+							return false;
+						}
+						else
+						{
+							// Also reset the countdown here
+							paused[instanceId] = false;
+							countDown[instanceId] = vBShout.instanceOptions[instanceId]['refresh'];
+						}
+					},
+					error:function(data, statusText, error)
+					{
+						// This should never happen
+						fetchShouts(instanceId, tab[instanceId], true);
+					}
+				});
+			}
+			else
+			{
+				// Execute AJAX
+				ajaxCall('fetch', instanceId, extraParams, 'GET');
+			}
+		}
+	};
+
+	// #########################################################################
+	// Shorthand for an ajax call
+	function ajaxCall(varname, instanceId, extraParams, type)
+	{
+		if (typeof type == 'undefined')
+		{
+			// Ensure we're setting this correctly
+			type = 'POST';
+			extraParams['securitytoken'] = SECURITYTOKEN;
+		}
+		
+		// Set additional global params
+		extraParams['do'] = 'ajax';
+		extraParams['action'] = varname;
+		extraParams['instanceid'] = instanceId;
+		extraParams['tabid'] = tab[instanceId];
+		
+		if (vBShout.userOptions.is_detached == '1')
+		{
+			// We're in detached mode
+			extraParams['detached'] = '1';
+		}
+		
+		if (pmUserId[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['pmuserid'] = pmUserId[instanceId];
+		}
+		
+		if (chatroom[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['chatroomid'] = chatroom[instanceId];
+		}
+		
+		if (shoutId[instanceId])
+		{
+			// Set who we're PMing
+			extraParams['shoutid'] = shoutId[instanceId];
+		}
+		
+		// Set shout order
+		extraParams['shoutorder'] = vBShout.instanceOptions[instanceId].shoutorder;
+		
+		// Set tab id
+		extraParams['pmtime'] = vBShout.userOptions.pmtime;		
+		
+		if (type == 'GET')
+		{
+			// Add random garble to avoid browser cache
+			extraParams['v'] = Math.random() * 99999999999999;
+		}
+		
+		$.ajax({
+			type: type,
+			url: 'vbshout.php',
+			data: (SESSIONURL ? SESSIONURL + '&' : '') + $.param(extraParams),
+			complete: function(xhr, statusText) {},
+			success: function(data, statusText, xhr)
+			{
+				var tagData = $(data);
+				data = {};
+
+				// Also reset the countdown here
+				paused[instanceId] = false;
+				countDown[instanceId] = vBShout.instanceOptions[instanceId]['refresh'];
+				
+				if (!hasFetched[instanceId] && vBShout.instancePermissions[instanceId].autoidle)
+				{
+					// We're pausing because we're auto idle
+					paused[instanceId] = hasFetched[instanceId] = true;
+				}
+
+				var arrVals = ['aoptimes', 'chatrooms', 'shouts'],
+					singleVals = ['ajax', 'activereports', 'activeusers2', 'content', 'editor', 'error', 'pmtime', 'pmuserid', 'sticky'];
+
+
+				// Only attribute val we have
+				if (tagData.find('activeusers').length)
+				{
+					var tagData2 = tagData.find('activeusers'); 
+					data['activeusers'] = {
+						'count' : tagData2.attr('count'),
+						usernames : tagData2.text()
+					};
+				}
+
+				// Trolol no it isn't
+				if (tagData.find('chatroom').length)
+				{
+					var tagData2 = tagData.find('chatroom'); 
+					data['chatroom'] = {
+						'chatroomid' : tagData2.attr('chatroomid'),
+						'title' : tagData2.text()
+					};
+				}
+
+				for (var i in singleVals)
+				{
+					if (tagData.find(singleVals[i]).length)
+					{
+						// Store this
+						data[singleVals[i]] = tagData.find(singleVals[i]).text();
+					}
+				}
+
+				for (var i in arrVals)
+				{
+					if (tagData.find(arrVals[i]).length)
+					{
+						// Store this
+						data[arrVals[i]] = {};
+						
+						tagData.find(arrVals[i]).children().each(function(j)
+						{
+							data[arrVals[i]][j] = {};
+							$(this).children().each(function()
+							{
+								data[arrVals[i]][j][$(this).prop('tagName')] = $(this).text();
+							});
+						});
+					}
+				}
+				
+				if (data.error)
+				{
+					var tmp = data.error.split('_');
+					if (tmp[0] == 'disband')
+					{
+						var chatroomid = parseInt(tmp[1]);
+						if (chatroomid)
+						{
+							if (chatroom[instanceId] == chatroomid)
+							{
+								// We need to reset chatroom id
+								chatroom[instanceId] = 0;
+								
+								// Show tab
+								fetchElem('tab', instanceId, 'div', '[data-tabid="shouts"]').trigger('click');
+							}
+							
+							// Close the offending tab
+							closeTab(fetchElem('tab', instanceId, 'div', '[data-tabid^="chatroom_' + chatroomid + '_"]').attr('data-tabid'), instanceId);
+							return false;
+						}
+					}
+					
+					// Throw the error returned
+					setMessage(data.error, 'error', instanceId);
+					
+					// Restore shout message
+					fetchElem('editor', instanceId).val(editorContents[instanceId]);
+					
+					// Log the error to the console
+					console.error(timeStamp() + "AJAX Error: %s", data.error);
+					
+					return true;		
+				}
+				
+				if (typeof data.sticky != 'undefined')
+				{
+					if (!data.sticky)
+					{
+						// We're removing the sticky note
+						fetchElem('frame_sticky', instanceId, 'div').fadeOut('fast');
+					}
+					else
+					{
+						// Print sticky message
+						setMessage(data.sticky, 'sticky', instanceId);
+					}
+				}
+				
+				if (typeof data.activeusers != 'undefined')
+				{
+					// Set the active users
+					fetchElem('activeusers', instanceId, 'span').text(data.activeusers.count);
+					fetchElem('sidebar', instanceId, 'div').html(data.activeusers.usernames);
+				}
+				
+				if (typeof data.activereports != 'undefined')
+				{
+					// Set the active users
+					fetchElem('shoutreports', instanceId, 'span').text(data.activereports);
+				}
+				
+				if (typeof data.editor != 'undefined')
+				{
+					// We're setting the editor contents
+					fetchElem('editor', instanceId).val(data.editor);
+					fetchElem('editor', instanceId).trigger('keyup');
+				}
+				
+				if (typeof data.content != 'undefined')
+				{
+					// We're setting shout frame contents
+					fetchElem('content', instanceId, 'div').html(data.content);
+				}
+				
+				if (typeof data.archive != 'undefined' && typeof data.shoutid != 'undefined')
+				{
+					// We're setting shout frame contents
+					fetchElem('message_' + data.shoutid, instanceId).html(data.archive);
+				}
+				
+				if (typeof data.pmuserid != 'undefined')
+				{
+					var tmp = fetchElem('lookup', instanceId, 'input');
+					
+					// Store this lookup
+					userIds[data.pmuserid] = tmp.val();
+					
+					// Create PM for this user
+					createTab('pm_' + data.pmuserid + '_' + instanceId, instanceId, tmp.val(), '1', {'userid' : data.pmuserid});
+					
+					// Show tab
+					fetchElem('tab', instanceId, 'div', '[data-tabid="pm_' + data.pmuserid + '_' + instanceId + '"]').trigger('click');
+					
+					// Zero this out
+					tmp.val('');				
+				}
+				
+				if (typeof data.chatroom != 'undefined')
+				{
+					// Zero this out
+					fetchElem('roomname', instanceId, 'input').val('');
+					
+					// Create chat room tab
+					createTab('chatroom_' + data.chatroom.chatroomid + '_' + instanceId, instanceId, data.chatroom.title, '1', {'chatroomid' : data.chatroom.chatroomid});
+					
+					// Show tab
+					fetchElem('tab', instanceId, 'div', '[data-tabid="chatroom_' + data.chatroom.chatroomid + '_' + instanceId + '"]').trigger('click');
+				}
+				
+				if (typeof data.aoptime != 'undefined')
+				{
+					// We had an AOP tag
+					if (aopTime[instanceId][tab[instanceId]] < data.aoptime || !aopTime[instanceId][tab[instanceId]])
+					{
+						// Overwrite the AOP time
+						aopTime[instanceId][tab[instanceId]] = data.aoptime;
+					}
+				}
+				
+				if (typeof data.pmtime != 'undefined')
+				{
+					if (pmTime[instanceId] < data.pmtime)
+					{
+						console.log(timeStamp() + "Playing pm sound for tab %s in instance %s", tab[instanceId], instanceId);
+						
+						// Ensure we only try this if we can
+						playSound('pm', instanceId);
+						
+						// Set PM time
+						pmTime[instanceId] = data.pmtime;
+					}
+				}			
+				
+				if (typeof data.aoptimes != 'undefined')
+				{
+					for (var i in data.aoptimes)
+					{
+						// Shorthand
+						var aoptime 	= data.aoptimes[i].aoptime;
+						var tabid 		= data.aoptimes[i].tabid;
+						var nosound 	= data.aoptimes[i].nosound;
+						
+						if (!aopTime[instanceId][tabid])
+						{
+							// This is an unvisited tab
+							aopTime[instanceId][tabid] = aoptime;
+							continue;
+						}
+						
+						if (aopTime[instanceId][tabid] >= aoptime)
+						{
+							// The AOP time is higher or equal, already seen it
+							continue;
+						}
+						
+						// We're editing a shout
+						console.log(timeStamp() + "Tab: %s\nAOP: %s\nPrevious AOP: %s\nInstance: %s", tabid, aoptime, aopTime[instanceId][tabid], instanceId);
+						
+						// Set the new AOP time
+						aopTime[instanceId][tabid] = aoptime;
+						
+						if (nosound == '0')
+						{
+							// Ensure we only try this if we can
+							console.log(timeStamp() + "Playing shout sound for tab %s in instance %s", tabid, instanceId);
+							playSound('shout', instanceId);
+						}
+						
+						if (tabid != tab[instanceId] && nosound == '0')
+						{					
+							// Get the object
+							fetchElem('tab', instanceId, 'div', '[data-tabid="' + tabid + '"]').addClass('dbtech_vbshout_highlight');
+						}
+					}
+				}
+				
+				if (typeof data.chatrooms != 'undefined')
+				{
+					for (var i in data.chatrooms)
+					{
+						if (!tabList[instanceId]['chatroom_' + data.chatrooms[i].chatroomid + '_' + data.chatrooms[i].instanceid])
+						{
+							// Ensure we only try this if we can
+							playSound('invite', instanceId);
+							
+							if (confirm(vbphrase['dbtech_vbshout_are_you_sure_chatjoin']
+								.replace(/%roomname%/igm, data.chatrooms[i].title)
+								.replace(/%username%/igm, data.chatrooms[i].username)
+							))
+							{
+								// Create chat room tab
+								createTab('chatroom_' + data.chatrooms[i].chatroomid + '_' + data.chatrooms[i].instanceid, instanceId, data.chatrooms[i].title, '1', {'chatroomid' : data.chatrooms[i].chatroomid});
+								
+								// HALT
+								paused[instanceId] = true;
+						
+								// Remove any idle flag we might have
+								vBShout_unIdle(instanceId, false);
+								
+								// Save our acceptance of the chatroom
+								ajaxCall('joinchat', instanceId, {'chatroomid' : data.chatrooms[i].chatroomid});
+								
+								// Show tab
+								fetchElem('tab', instanceId, 'div', '[data-tabid="chatroom_' + data.chatrooms[i].chatroomid + '_' + data.chatrooms[i].instanceid + '"]').trigger('click');
+							}
+							else
+							{
+								// HALT
+								paused[instanceId] = true;
+						
+								// Remove any idle flag we might have
+								vBShout_unIdle(instanceId, false);
+								
+								// Nah, we don't want this chat
+								ajaxCall('leavechat', instanceId, {'chatroomid' : data.chatrooms[i].chatroomid, 'status': 1});
+							}
+						}
+					}
+				}
+				
+				if (typeof data.shouts != 'undefined')
+				{
+					// Clean out menus
+					fetchElem('menucode', instanceId, 'div').children('ul').remove();
+
+					// Set menu id
+					menuId[instanceId] = 0;
+
+					// Begin storing the output
+					var shoutIds = [], 
+						shoutsById = [];
+
+					for (var i in data.shouts)
+					{
+						// Set this
+						data.shouts[i].hidenewshout = !(fetchElem('shoutwrapper', instanceId, '[data-shoutid="' + data.shouts[i].shoutid + '"]').length);
+
+						// Add the shoutid to the array
+						shoutIds[i] = data.shouts[i];
+						shoutsById[data.shouts[i].shoutid] = true;
+					}
+					
+					fetchElem('shoutwrapper', instanceId, 'div').each(function(index, element)
+					{
+						if (!shoutsById[$(this).attr('data-shoutid')])
+						{
+							// Deleted shout, fade it out
+							$(this).fadeOut('fast');
+						}
+					});
+					
+					if (shoutIds.length)
+					{
+						fetchElem('shoutwrapper', instanceId, 'div').promise().done(function()
+						{
+							var contentObj = fetchElem('content', instanceId);
+							
+							// Set the content if we had any
+							contentObj.html('');
+
+							for (var i in shoutIds)
+							{
+								// Shorthand
+								var shout = shoutIds[i];
+								shout.permissions = $.parseJSON(shout.permissions);
+
+								// Add the shout template
+								$('#dbtech_vbshout_shouttype_' + shout.template).tmpl(shout).appendTo(contentObj);
+
+								// Set the drop-down
+								$('#dbtech_vbshout_memberaction_dropdown').tmpl(shout).appendTo(fetchElem('menu', instanceId, 'ul', '[data-userid="' + shout.userid + '"][data-shoutid="' + shout.shoutid + '"]'));
+
+								// Save new menu to body
+								fetchElem('menucode', instanceId, 'div').append(fetchElem('menu', instanceId, 'ul', '[data-userid="' + shout.userid + '"][data-shoutid="' + shout.shoutid + '"]'));
+							}
+
+							// Fade in new shouts
+							fetchElem('shoutwrapper', instanceId, 'div').filter(':hidden').fadeIn('fast');						
+						});
+						
+						fetchElem('shoutwrapper', instanceId, 'div').promise().done(function()
+						{
+							if (vBShout.instanceOptions[instanceId]['shoutorder'] == 'ASC')
+							{
+								// Scroll RLY FAR DOWN, liek srsly
+								fetchElem('frame', instanceId).scrollTop(99999999);
+							}
+						});
+					}
+				}
+			},
+			error:function(data, statusText, error)
+			{
+				// Also reset the countdown here
+				paused[instanceId] = false;
+				countDown[instanceId] = vBShout.instanceOptions[instanceId]['refresh'];
+				
+				try
+				{
+					if (data.statusText == 'communication failure' || data.statusText == 'transaction aborted' || data.status == 0)
+					{
+						// Ignore this error
+						return false;
+					}
+					
+					// Restore shout message
+					fetchElem('editor', instanceId).val(editorContents[instanceId]);
+					
+					// Throw the error returned
+					setMessage(data.status + ' ' + textStatus, 'error', instanceId);
+					
+					// Log the error to the console
+					console.error(timeStamp() + "AJAX Error: Status = %s: %s", data.status, data.statusText);
+				}
+				catch (e)
+				{
+					// Log the error to the console
+					console.error(timeStamp() + "AJAX Error: %s", data.responseText);
+				}
+			}
+		});
+	};
+
+	// #########################################################################
+	// Play a sound if not muted
+	function playSound(sound, instanceId)
+	{
+		vBShout.userOptions.soundSettings = vBShout.userOptions.soundSettings || {};
+		vBShout.userOptions.soundSettings[instanceId] = vBShout.userOptions.soundSettings[instanceId] || {};
+		vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] = vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] || '1';
+		
+		if (vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] == '0')
+		{
+			// We were muted
+			return true;
+		}
+		
+		// Play the sound
+		fetchElem('sound_' + sound, instanceId).trigger('play');
+	};
+
+	// #########################################################################
+	// Sets the mute button's status
+	function setMuteButton(instanceId)
+	{
+		vBShout.userOptions.soundSettings = vBShout.userOptions.soundSettings || {};
+		vBShout.userOptions.soundSettings[instanceId] = vBShout.userOptions.soundSettings[instanceId] || {};
+		vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] = vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] || '1';
+		
+		var thisButton = fetchElem('soundbutton', instanceId, 'img');
+		
+		if (thisButton.length)
+		{
+			// Set the button status
+			thisButton.attr('src', 
+				thisButton.attr('src').replace(
+					'sound_' + (vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] == '1' ? 'off' : 'on') + '.png',
+					'sound_' + (vBShout.userOptions.soundSettings[instanceId][tab[instanceId]] == '0' ? 'off' : 'on') + '.png')
+			);
+		}
+	};
+
+	// #########################################################################
+	// Function for displaying a thrown error
+	function setMessage(msg, type, instanceId)
+	{
+		// Log the error to the console
+		console.log(timeStamp() + "Setting %s: %s", type.charAt(0).toUpperCase() + '' + type.substr(1), msg);
+		
+		if (fetchElem('frame', instanceId, 'div').length)
+		{
+			// Display the message
+			fetchElem('message_' + type, instanceId, 'span').html(msg);
+			
+			if (type != 'sticky' && type != 'notice')
+			{
+				// This is a temporary one
+				var notice = fetchElem('frame_' + type, instanceId, 'div');
+				notice.fadeIn('fast');
+				setTimeout(function()
+				{
+					notice.fadeOut('fast');
+				}, 5000);
+			}
+			else
+			{
+				// Permanent notice
+				fetchElem('frame_' + type, instanceId, 'div').show();
+			}
+		}
+	};	
+
+	// #########################################################################
+	// Debugging function, generates a timestamp of when something occurred
+	function timeStamp()
+	{
+		var d = new Date();
+		
+		return '[' + d.getHours() + ':' + d.getMinutes() + ':' + d.getSeconds() + '] ';
+	};
+	
+	// #########################################################################
+	// Fetching a specific element by name
+	function fetchElem(elemName, instanceId, el, extraFilter)
+	{
+		// Pry out the element from the list of elements, by instance id
+		return $((el ? el : '') + '[name="dbtech_vbshout_' + elemName + '"]' + (instanceId ? '[data-instanceid=' + instanceId + ']' : '') + (extraFilter ? extraFilter : ''));
+	};
+	
+	// #########################################################################
+	// Converts an rgb value to hex
+	function rgbToHex(colorStr)
+	{
+		var hex = '#';
+		$.each(colorStr.substring(4).split(','), function(i, str)
+		{
+			var h = ($.trim(str.replace(')','')) * 1).toString(16);
+			hex += (h.length == 1) ? "0" + h : h;
+		});
+		return hex;
+	};	
+});
+
+
+// #############################################################################
+// Un-idle helper function
+function vBShout_unIdle(instanceId, keepPause)
+{
+	vBShout.userOptions.idle[instanceId].unIdle = true;
+	vBShout.userOptions.idle[instanceId].unPause = (keepPause ? false : true);
+	return false;
+};
+
+// #############################################################################
+// Initialise the smileys (make them clickable)
+function vBShout_initSmilies(smilie_container, instanceId)
+{
+	if (smilie_container != null)
+	{
+		var editdoc = window.opener.document.getElementById('dbtech_vbshout_editor' + instanceId);
+		
+		//console.log(window.opener.document.getElementById('dbtech_vbshout_editor' + instanceId
+		jQueryDupe('img[id^="smilie_"]', smilie_container).each(function(index, element)
+		{
+			var thisSmiley = jQueryDupe(this);
+			
+			// Set some CSS and other attributes
+			thisSmiley.css('cursor', 		'pointer');
+			thisSmiley.attr('unselectable', 'on');
+			thisSmiley.on('click', function (e)
+			{
+				// Stuff that's needed
+				var text 		= ' ' + this.alt;
+				
+				if (!editdoc.hasfocus || (is_moz && is_mac))
+				{
+					editdoc.focus();
+					if (is_opera)
+					{
+						editdoc.focus();
+					}
+				}
+				
+				if (typeof(editdoc.selectionStart) != 'undefined')
+				{
+					var opn = editdoc.selectionStart + 0;
+					var scrollpos = editdoc.scrollTop;
+		
+					editdoc.value = editdoc.value.substr(0, editdoc.selectionStart) + text + editdoc.value.substr(editdoc.selectionEnd);
+		
+					if (movestart === false)
+					{
+						// do nothing
+					}
+					else if (typeof movestart != 'undefined')
+					{
+						editdoc.selectionStart = opn + movestart;
+						editdoc.selectionEnd = opn + text.vBlength() - moveend;
+					}
+					else
+					{
+						editdoc.selectionStart = opn;
+						editdoc.selectionEnd = opn + text.vBlength();
+					}
+					editdoc.scrollTop = scrollpos;
+				}
+				else if (document.selection && document.selection.createRange)
+				{
+					var sel = document.selection.createRange();
+					sel.text = text.replace(/\r?\n/g, '\r\n');
+		
+					if (movestart === false)
+					{
+						// do nothing
+					}
+					else if (typeof movestart != 'undefined')
+					{
+						if ((movestart - text.vBlength()) != 0)
+						{
+							sel.moveStart('character', movestart - text.vBlength());
+							selection_changed = true;
+						}
+						if (moveend != 0)
+						{
+							sel.moveEnd('character', -moveend);
+							selection_changed = true;
+						}
+					}
+					else
+					{
+						sel.moveStart('character', -text.vBlength());
+						selection_changed = true;
+					}
+		
+					if (selection_changed)
+					{
+						sel.select();
+					}
+				}
+				else
+				{
+					// failed - just stuff it at the end of the message
+					editdoc.value += text;
+				}				
+				
+				return false;		
+			});			
+		});
+	}
+};

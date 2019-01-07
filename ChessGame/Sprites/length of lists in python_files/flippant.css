@@ -1,0 +1,68 @@
+.flippant {
+	-webkit-transform: perspective(500px) rotateY(0deg);
+	-moz-transform: perspective(500px) rotateY(0deg);
+	transform: perspective(500px) rotateY(0deg);
+	/*z-index: 200;*/
+}
+
+.flippant-back {
+	-moz-transform: perspective(500px) rotateY(-180deg);
+	-webkit-transform: perspective(500px) rotateY(-180deg);
+	transform: perspective(500px) rotateY(-180deg);
+	height: 0;
+	z-index: 9998;
+}
+
+.flippant, .flippant-back {
+	-webkit-transform-style: preserve-3d;
+	-moz-transform-style: preserve-3d;
+  transform-style: preserve-3d;
+	-webkit-backface-visibility: hidden;
+	-moz-backface-visibility: hidden;
+	backface-visibility: hidden;
+
+}
+
+.flippant, .flipper {
+	-o-transition: all .2s ease-in-out;
+	-ms-transition: all .2s ease-in-out;
+	-moz-transition: all .2s ease-in-out;
+	-webkit-transition: all .2s ease-in-out;
+	transition: all .2s ease-in-out;
+}
+
+.flippant.flipped {
+	-moz-transform: perspective(500px) rotateY(180deg);
+	-webkit-transform: perspective(500px) rotateY(180deg);
+	transform: perspective(500px) rotateY(180deg);
+
+}
+
+.flippant-back.flipped  {
+	-moz-transform: perspective(500px) rotateY(0deg);
+	-webkit-transform: perspective(500px) rotateY(0deg);
+	transform: perspective(500px) rotateY(0deg);
+}
+
+.flippant-modal-dark, .flippant-modal-light {
+	position: fixed;
+	margin: 0;
+	top: 2.5%;
+	left: 2.5%;
+	width: 95%;
+	height: 95%;
+	padding: 1em;
+	box-sizing: border-box;
+}
+
+.flippant-modal-dark, .flippant-modal-dark p { color: white;}
+
+.flippant-modal-light {
+	background:white; background:rgba(255,255,255,.95);
+	box-shadow: 3px 3px 15px rgba(33,33,33,.3);
+	border-radius: 5px;
+	border: 1px solid #aaa;
+}
+
+/*header fix for floated close button*/
+.flippant-modal-light h4 {display: inline-block;}
