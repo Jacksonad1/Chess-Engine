@@ -21,9 +21,7 @@ class Game(object):
         self.screen = screen
         self.mouseClicked = -1
         self.prevClicked = -1
-        self.moved = False
-        self.validMoves = [0] * 64
-        self.validSprite = pygame.image.load(os.path.join('Sprites', 'validMoves.png' ))
+        self.moved = False 
     '''
      -Updates what is displayed on the screen
     '''
@@ -49,19 +47,16 @@ class Game(object):
             dColumn = int(self.mouseClicked % 8)
             dColumn = dColumn * 100  
             self.screen.blit(Destination, (dColumn, dRow))
-                     
-        
+                             
+
         for i in range(B_START, B_END):
             row = int(i / 8)
             row = row * 100 + 20
             column = int(i % 8)
             column = column * 100 + 20
-            if(self.validMoves[i] != 0):
-                self.screen.blit(self.validSprite, (column - 20 , row - 20 ))
             if(self.Board.boardArray[i] != 0):
                 self.screen.blit(self.Board.boardArray[i].sprite, (column , row ))
         pygame.display.flip()
-
         
 
     '''
@@ -75,11 +70,7 @@ class Game(object):
         x = int(x / 100)
         y = int(y / 100)
         self.prevClicked = self.mouseClicked
-        pos = (y * 8) + x
-        self.mouseClicked = pos
-        if(self.Board.boardArray[pos] != 0):
-            self.Board.boardArray[pos].calculateMoves()
-            self.validMoves = self.Board.boardArray[pos].moves
+        self.mouseClicked = (y * 8) + x
         self.moved = False
     '''
     - moves a piece from prev clicked to mouseclicked positions
